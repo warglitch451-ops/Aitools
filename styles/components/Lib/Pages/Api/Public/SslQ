@@ -1,0 +1,48 @@
+-- Create tables
+CREATE TABLE IF NOT EXISTS public.users (
+  id UUID REFERENCES auth.users PRIMARY KEY,
+  email TEXT,
+  is_premium BOOLEAN DEFAULT false,
+  subscription_end_date TIMESTAMP,
+  created_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.wallets (
+  user_id UUID PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
+  coin_balance INT DEFAULT 10,
+  total_ads_watched INT DEFAULT 0,
+  updated_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.transactions (
+  id SERIAL PRIMARY KEY,
+  user_id UUID REFERENCES public.users(id),
+  amount INT,
+  type TEXT CHECK (type IN ('ad_watch', 'purchase', 'spend', 'bonus')),
+  tool_used TEXT,
+  created_at TIMESTAMP DEFAULT now()
+);
+
+-- Function to add/remove coins
+CREATE OR REPLACE FUNCTION add_coins(user_id UUID, amount INT, transaction_type TEXT, tool_name TEXT DEFAULT NULL)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE wallets SET coin_balance = coin_balance + amount, updated_at = now() WHERE wallets.user_id = add_coins.user_id;
+  INSERT INTO transactions (user_id, amount, type, tool_used) VALUES (add_coins.user_id, add_coins.amount, add_coins.transaction_type, add_coins.tool_name);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger to create user record and wallet on signup
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.users (id, email) VALUES (NEW.id, NEW.email);
+  INSERT INTO public.wallets (user_id, coin_balance) VALUES (NEW.id, 10);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
